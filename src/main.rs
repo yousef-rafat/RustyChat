@@ -32,7 +32,10 @@ async fn handle_args(args: &Vec<String>) {
                     }
                 }
             } 
-            else { Some(8080) };
+            else { 
+                println!("No port was choosen. Defaulting to 8080.");
+                Some(8080)
+            };
 
             server::init_server(port).await;
         },

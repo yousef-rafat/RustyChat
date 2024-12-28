@@ -1,7 +1,12 @@
 use std::{io::ErrorKind, net::{SocketAddr, TcpListener}};
-use tokio::{io::AsyncBufReadExt, net::TcpListener as TokioTcpListener}; 
-use rand::Rng;
+use tokio::{io::AsyncBufReadExt, net::TcpListener as TokioTcpListener, sync::broadcast}; 
+use std::collections::HashMap;
 use tokio::io::AsyncWriteExt;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use rand::Rng;
+
+type UserMap = Arc<Mutex<HashMap<String, String>>>;
 
 pub async fn init_server(choosen_port: Option<u16>) {
 
@@ -30,9 +35,13 @@ pub async fn init_server(choosen_port: Option<u16>) {
 }
 
 async fn process(listener: TokioTcpListener) {
+
+    let (tx,  _rx) = broadcast::channel(10);
+    let user_map: UserMap = Arc::new(Mutex::new(HashMap::new()));
+
     loop {
 
-        let (socket, _addr) = match listener.accept().await {
+        let (socket, addr) = match listener.accept().await {
             Ok(connection) => connection,
             Err(e) => {
                 eprintln!("Failed to accept connection: {}", e);
@@ -40,40 +49,138 @@ async fn process(listener: TokioTcpListener) {
             }
         };
 
+        let tx = tx.clone();
+        let mut rx = tx.subscribe();
+        let user_map = Arc::clone(&user_map);
+
         tokio::spawn(async move {
-            
-            let mut buffer = String::new(); // vec![0u8; 1024];
+
+            let mut buffer = String::new();
+            let mut username_buffer = String::new();
+
             let mut reader = tokio::io::BufReader::new(socket);
 
             loop {
 
-                match reader.read_line(&mut buffer).await {//socket.read(&mut buffer).await {
+                if let Err(e) = reader.get_mut().write_all("\rEnter Username: ".as_bytes()).await {
+                    eprintln!("ERROR in writing text: {e}");
+                    return;
+                }
 
-                    Ok(0) => {
-                        println!("Connection Closed!");
-                        std::process::exit(0);
+                if let Err(e) = reader.read_line(&mut username_buffer).await {
+                    eprintln!("ERROR in reading username: {e}");
+                    return;
+                } else {
+                    // should print welcome to the new user that has joined the channel
+                }
+
+                let username = username_buffer.trim().to_string();
+
+                if username.is_empty() {
+                    eprintln!("Can't process an empty username!");
+                }
+
+                let mut username_taken = false;
+
+                // Lock the map and check if the username is taken
+                {
+                    let mut map = user_map.lock().await;
+                    username_taken = map.contains_key(&username);
+                    if !username_taken {
+                        map.insert(username.clone(), addr.to_string()); // Insert the new user
                     }
+                }
+        
+                // If username is taken, send the appropriate response
+                if username_taken {
+                    if let Err(e) = reader.get_mut().write_all(b"Username is already taken. Try again.\n").await {
+                        eprintln!("Error username is already taken: {e}");
+                    }
+                    username_buffer.clear(); // Clear buffer for retry
+                } else {
+                    break;
+                }
+        }
 
-                    Ok(_) => {
+            loop {
 
-                        println!("Received: {:?}", buffer.trim_end());
+                tokio::select! {
+                    // Handle reading from the client
+                    read_result = reader.read_line(&mut buffer) => {
+                        match read_result {
 
-                        if let Err(e) = reader.get_mut().write_all(buffer.as_bytes()).await {
-                            eprintln!("Error writing to socket: {e}");
-                            break;
+                            Ok(0) => {
+                                println!("Connection Closed!");
+                                break;
+                            }
+
+                            Ok(_) => {
+
+                                let input = buffer.to_string();
+                                let processed_input = process_backspaces(&input);
+
+                                println!("Received: {:?}", processed_input.trim_end());
+
+                                // Send the messages to all users
+                                if !processed_input.is_empty() {
+                                    //let message = processed_input.clone();
+                                    if let Err(e) = tx.send((processed_input.clone(), addr)) {
+                                        eprintln!("Error while sending a message: {e}");
+                                        break;
+                                    }
+                                }
+
+                                buffer.clear();
+                            }
+
+                            Err(e) => {
+                                eprintln!("Error reading from socket: {}", e);
+                                break;
+                            }
                         }
-
-                        buffer.clear();
-                    },
-
-                    Err(e) => {
-                        eprintln!("Error reading from socket: {}", e);
-                        std::process::exit(0);
                     }
-                };     
+
+                    // Handle broadcasting messages
+                    recv_result = rx.recv() => {
+
+                        match recv_result {
+
+                            Ok((msg, other_addr)) => {
+                                let processed_msg = process_backspaces(&msg);
+
+                                if addr != other_addr {
+                                    if let Err(e) = reader.get_mut().write_all(processed_msg.as_bytes()).await {
+                                        eprintln!("Error writing to socket: {e}");
+                                        break;
+                                    }
+                                }
+                            }
+
+                            Err(e) => {
+                                eprintln!("Error receiving messages: {e}");
+                                break;
+                            }
+                        }
+                    }
+                }
             }
-        });    
+        });
     }
+}
+
+
+fn process_backspaces(buffer: &str) -> String {
+    let mut result = String::new();
+    
+    for c in buffer.chars() {
+        if c == '\u{8}' {
+            result.pop();
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 fn is_port_used(port: u16) -> bool {
