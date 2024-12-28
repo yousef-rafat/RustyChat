@@ -70,24 +70,23 @@ async fn process(listener: TokioTcpListener) {
                 if let Err(e) = reader.read_line(&mut username_buffer).await {
                     eprintln!("ERROR in reading username: {e}");
                     return;
-                } else {
-                    // should print welcome to the new user that has joined the channel
                 }
 
                 let username = username_buffer.trim().to_string();
 
                 if username.is_empty() {
                     eprintln!("Can't process an empty username!");
+                    continue;
                 }
 
-                let mut username_taken = false;
+                let username_taken;
 
                 // Lock the map and check if the username is taken
                 {
                     let mut map = user_map.lock().await;
-                    username_taken = map.contains_key(&username);
+                    username_taken = map.values().any(|v| v == &username); 
                     if !username_taken {
-                        map.insert(username.clone(), addr.to_string()); // Insert the new user
+                        map.insert(addr.clone().to_string(), username.clone()); // Insert the new user
                     }
                 }
         
@@ -98,11 +97,33 @@ async fn process(listener: TokioTcpListener) {
                     }
                     username_buffer.clear(); // Clear buffer for retry
                 } else {
+                   // print welcome to the new user that has joined the channel
+                   let welcome_message = format!("{} has joined the chat.\n\r", {username});
+
+                   if let Err(e) = tx.send((welcome_message.clone(), addr)) {
+                    eprintln!("Error broadcasting welcome message: {e}");
+
+                    if let Err(e) = reader.get_mut().write_all("Joined the channel.\n\r".as_bytes()).await {
+                        eprintln!("Error sending welcome message to new user: {e}");
+                    }
+                }
+
                     break;
                 }
         }
 
             loop {
+
+                let username = {
+                    let map = user_map.lock().await;
+                    match map.get(&addr.to_string()) {
+                        Some(user) => user.clone(),
+                        None => {
+                            eprintln!("Problem with finding username");
+                            continue; // Skip to the next iteration of the loop
+                        }
+                    }
+                };
 
                 tokio::select! {
                     // Handle reading from the client
@@ -117,14 +138,15 @@ async fn process(listener: TokioTcpListener) {
                             Ok(_) => {
 
                                 let input = buffer.to_string();
+
                                 let processed_input = process_backspaces(&input);
 
                                 println!("Received: {:?}", processed_input.trim_end());
-
+                                                            
                                 // Send the messages to all users
                                 if !processed_input.is_empty() {
-                                    //let message = processed_input.clone();
-                                    if let Err(e) = tx.send((processed_input.clone(), addr)) {
+                                    let message = format!("{}: {}", username, processed_input.clone());
+                                    if let Err(e) = tx.send((message.clone(), addr)) {
                                         eprintln!("Error while sending a message: {e}");
                                         break;
                                     }
@@ -147,7 +169,7 @@ async fn process(listener: TokioTcpListener) {
 
                             Ok((msg, other_addr)) => {
                                 let processed_msg = process_backspaces(&msg);
-
+                    
                                 if addr != other_addr {
                                     if let Err(e) = reader.get_mut().write_all(processed_msg.as_bytes()).await {
                                         eprintln!("Error writing to socket: {e}");
