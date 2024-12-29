@@ -45,6 +45,20 @@ where
     }
 }
 
+pub async fn show_users<T>(reader: &mut tokio::io::BufReader<T>, users: Vec<String>)
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let mut user_list = String::from("Current users in the chat:\n\r");
+    for user in users {
+        user_list.push_str(&format!("- {}\n\r", user));
+    }
+
+    if let Err(e) = reader.get_mut().write_all(user_list.as_bytes()).await {
+        eprintln!("Failed to send user list: {e}");
+    }   
+}
+
 pub async fn check_for_magic_commands(text: &String) -> Option<&str> {
 
     let magic_command_pattern = r"&[a-zA-Z_][a-zA-Z0-9_]*";
@@ -54,6 +68,7 @@ pub async fn check_for_magic_commands(text: &String) -> Option<&str> {
         match matched_command.as_str() {
             "&save_text" => return Some("&save_text"),
             "&clear_screen" => return Some("&clear_screen"),
+            "&show_users" => return Some("&show_users"),
             _ => {
                 eprintln!("Unkown Magic Command!");
                 return Some("None");

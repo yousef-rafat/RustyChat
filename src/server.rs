@@ -99,7 +99,7 @@ async fn process(listener: TokioTcpListener) {
                     username_buffer.clear(); // Clear buffer for retry
                 } else {
                    // print welcome to the new user that has joined the channel
-                   let welcome_message = format!("{} has joined the chat.\n\r", {username});
+                   let welcome_message = format!("{} has joined the chat.\n\r", {username.clone()});
 
                    if let Err(e) = tx.send((welcome_message.clone(), addr)) {
                     eprintln!("Error broadcasting welcome message: {e}");
@@ -170,6 +170,13 @@ async fn process(listener: TokioTcpListener) {
                                                 }
                                                 "&clear_screen" => {
                                                     commands::clear_terminals(&mut reader).await;
+                                                }
+                                                "&show_users" => {
+                                                    let map = user_map.lock().await; 
+
+                                                    // Extract the usernames (values from the map)
+                                                    let usernames: Vec<String> = map.values().cloned().collect();
+                                                    commands::show_users(&mut reader, usernames.clone()).await;
                                                 }
                                                 _ => {
                                                     if let Err(e) = tx.send((message.clone(), addr)) {
