@@ -5,6 +5,7 @@ use tokio::io::AsyncWriteExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use rand::Rng;
+use crate::commands;
 
 type UserMap = Arc<Mutex<HashMap<String, String>>>;
 
@@ -110,7 +111,8 @@ async fn process(listener: TokioTcpListener) {
 
                     break;
                 }
-        }
+            }
+            let mut message_content: Vec<String> = vec![];
 
             loop {
 
@@ -145,10 +147,39 @@ async fn process(listener: TokioTcpListener) {
                                                             
                                 // Send the messages to all users
                                 if !processed_input.is_empty() {
+
                                     let message = format!("{}: {}", username, processed_input.clone());
-                                    if let Err(e) = tx.send((message.clone(), addr)) {
-                                        eprintln!("Error while sending a message: {e}");
-                                        break;
+
+                                    message_content.push(message.clone());
+
+                                    match commands::check_for_magic_commands(&processed_input).await {
+                                        Some(command) => {
+                                            match command {
+                                                "&save_text" => {
+
+                                                    let filted_messages = commands::filter_duplicates(message_content.clone());
+
+                                                    match commands::save_chat(username.clone(), filted_messages.clone()).await {
+                                                        Ok(_) => {},
+                                                        Err(e) => {eprintln!("Problem with saving chat: {e}")}
+                                                    };
+
+                                                    if let Err(e) = reader.get_mut().write_all("The text chat was saved!.\n\r".as_bytes()).await {
+                                                        eprintln!("Error sending success saving-chat message to user: {e}");
+                                                    }
+                                                }
+                                                "&clear_screen" => {
+                                                    commands::clear_terminals(&mut reader).await;
+                                                }
+                                                _ => {
+                                                    if let Err(e) = tx.send((message.clone(), addr)) {
+                                                        eprintln!("Error while sending a message: {e}");
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        None => {}
                                     }
                                 }
 
@@ -169,6 +200,8 @@ async fn process(listener: TokioTcpListener) {
 
                             Ok((msg, other_addr)) => {
                                 let processed_msg = process_backspaces(&msg);
+
+                                message_content.push(processed_msg.clone());
                     
                                 if addr != other_addr {
                                     if let Err(e) = reader.get_mut().write_all(processed_msg.as_bytes()).await {

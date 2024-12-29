@@ -1,5 +1,6 @@
 use std::env;
 mod server;
+mod commands;
 
 const HELP: &str = "RustyChat is a simple local chat server, allowing for no latency communication with users on the same network";
 
