@@ -7,12 +7,15 @@ use tokio::sync::Mutex;
 use rand::Rng;
 use crate::commands;
 
+// type for creating our maps
 type UserMap = Arc<Mutex<HashMap<String, String>>>;
 
 pub async fn init_server(choosen_port: Option<u16>) {
 
     let port;
 
+    // check if the user choosen port is used or not
+    // if used assign a different one
     match choosen_port {
         Some(p) => { 
             if is_port_used(p) { 
@@ -27,6 +30,7 @@ pub async fn init_server(choosen_port: Option<u16>) {
 
     let port_addr: String = format!("127.0.0.1:{}", port);
 
+    // create a TCP server for our chatting
     let listener= TokioTcpListener::bind(port_addr).await.expect("Couldn't Create Server");
 
     println!("Your chat server is at: 127.0.0.1:{}", port);
@@ -37,7 +41,10 @@ pub async fn init_server(choosen_port: Option<u16>) {
 
 async fn process(listener: TokioTcpListener) {
 
+    // create the broadcast channel that our users will use to communicate on
+    // every sending message will go to everyone one on the this channel
     let (tx,  _rx) = broadcast::channel(10);
+    // user map for mapping the usernames with their addresses
     let user_map: UserMap = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
@@ -50,12 +57,15 @@ async fn process(listener: TokioTcpListener) {
             }
         };
 
+        // cloning to avoid rust errors
         let tx = tx.clone();
         let mut rx = tx.subscribe();
         let user_map = Arc::clone(&user_map);
 
         tokio::spawn(async move {
 
+            // buffer for storing our text
+            // username_buffer for storing usernames
             let mut buffer = String::new();
             let mut username_buffer = String::new();
 
@@ -63,11 +73,13 @@ async fn process(listener: TokioTcpListener) {
 
             loop {
 
+                // ask each user for their usernames
                 if let Err(e) = reader.get_mut().write_all("\rEnter Username: ".as_bytes()).await {
                     eprintln!("ERROR in writing text: {e}");
                     return;
                 }
 
+                // read the user's name
                 if let Err(e) = reader.read_line(&mut username_buffer).await {
                     eprintln!("ERROR in reading username: {e}");
                     return;
@@ -75,23 +87,23 @@ async fn process(listener: TokioTcpListener) {
 
                 let username = username_buffer.trim().to_string();
 
-                if username.is_empty() {
+                if username.is_empty() { // refuse to process empty
                     eprintln!("Can't process an empty username!");
                     continue;
                 }
 
                 let username_taken;
 
-                // Lock the map and check if the username is taken
+                // lock the map and check if the username is taken
                 {
                     let mut map = user_map.lock().await;
                     username_taken = map.values().any(|v| v == &username); 
                     if !username_taken {
-                        map.insert(addr.clone().to_string(), username.clone()); // Insert the new user
+                        map.insert(addr.clone().to_string(), username.clone()); // insert the new user
                     }
                 }
         
-                // If username is taken, send the appropriate response
+                // if username is taken, send the appropriate response
                 if username_taken {
                     if let Err(e) = reader.get_mut().write_all(b"Username is already taken. Try again.\n").await {
                         eprintln!("Error username is already taken: {e}");
@@ -112,10 +124,12 @@ async fn process(listener: TokioTcpListener) {
                     break;
                 }
             }
+            // will save the conversation in the chat
             let mut message_content: Vec<String> = vec![];
 
             loop {
 
+                // searches the map we created above to get the username from the address
                 let username = {
                     let map = user_map.lock().await;
                     match map.get(&addr.to_string()) {
@@ -142,7 +156,8 @@ async fn process(listener: TokioTcpListener) {
                                 let input = buffer.to_string();
 
                                 let processed_input = process_backspaces(&input);
-
+                                
+                                // for debugging
                                 println!("Received: {:?}", processed_input.trim_end());
                                                             
                                 // Send the messages to all users
@@ -152,11 +167,13 @@ async fn process(listener: TokioTcpListener) {
 
                                     message_content.push(message.clone());
 
+                                    // checks if any magic command in the code and match it with the correct function
                                     match commands::check_for_magic_commands(&processed_input).await {
                                         Some(command) => {
                                             match command {
                                                 "&save_text" => {
-
+                                                    // filter the duplicates and save the chat
+                                                    // later notify the user that the chat was saved
                                                     let filted_messages = commands::filter_duplicates(message_content.clone());
 
                                                     match commands::save_chat(username.clone(), filted_messages.clone()).await {
@@ -182,6 +199,7 @@ async fn process(listener: TokioTcpListener) {
                                                     commands::display_help(&mut reader).await;
                                                 }
                                                 _ => {
+                                                    // if no magic command, send the message normally
                                                     if let Err(e) = tx.send((message.clone(), addr)) {
                                                         eprintln!("Error while sending a message: {e}");
                                                         break;
@@ -192,7 +210,8 @@ async fn process(listener: TokioTcpListener) {
                                         None => {}
                                     }
                                 }
-
+                                
+                                // clearing the buffer is important for correct message transimition
                                 buffer.clear();
                             }
 
@@ -210,7 +229,8 @@ async fn process(listener: TokioTcpListener) {
 
                             Ok((msg, other_addr)) => {
                                 let processed_msg = process_backspaces(&msg);
-
+                                
+                                // pushing the messages to a buffer so  we can save it if the user want to
                                 message_content.push(processed_msg.clone());
                     
                                 if addr != other_addr {
@@ -235,6 +255,7 @@ async fn process(listener: TokioTcpListener) {
 
 
 fn process_backspaces(buffer: &str) -> String {
+    // function used to remove the backspace symbol: '\u{8}' from text
     let mut result = String::new();
     
     for c in buffer.chars() {
@@ -249,6 +270,7 @@ fn process_backspaces(buffer: &str) -> String {
 }
 
 fn is_port_used(port: u16) -> bool {
+    // Checks if the port is used or not by setting a tcp connection and dropping it after knowing it's not in use
     let addr = format!("127.0.0.1:{}", port);
     let socket_addr: SocketAddr = addr.parse().expect("Invalid address format");
 
@@ -265,7 +287,7 @@ fn is_port_used(port: u16) -> bool {
 }
 
 fn get_port() -> u16 {
-
+    // get a randomly assigned port
     let mut port;
     port = rand::thread_rng().gen_range(1024..65535);
 
