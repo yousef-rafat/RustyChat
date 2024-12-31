@@ -178,6 +178,9 @@ async fn process(listener: TokioTcpListener) {
                                                     let usernames: Vec<String> = map.values().cloned().collect();
                                                     commands::show_users(&mut reader, usernames.clone()).await;
                                                 }
+                                                "&help" => {
+                                                    commands::display_help(&mut reader).await;
+                                                }
                                                 _ => {
                                                     if let Err(e) = tx.send((message.clone(), addr)) {
                                                         eprintln!("Error while sending a message: {e}");

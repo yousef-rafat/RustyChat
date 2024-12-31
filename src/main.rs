@@ -2,7 +2,7 @@ use std::env;
 mod server;
 mod commands;
 
-const HELP: &str = "RustyChat is a simple local chat server, allowing for no latency communication with users on the same network";
+const HELP: &str = "RustyChat is a simple async local chat server based on the terminal, allowing for low latency communication with users on the same network.\n\rTo start a server use rustychat init";
 
 #[tokio::main]
 async fn main() {

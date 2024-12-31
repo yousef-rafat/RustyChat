@@ -59,6 +59,24 @@ where
     }   
 }
 
+pub async fn display_help<T>(reader: &mut tokio::io::BufReader<T>) 
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+
+    let help_message = "
+    \n\rMagic Commands:
+    \n\r- &save_text: Save the current chat history to a file.
+    \n\r- &clear_screen: Clear your terminal screen.
+    \n\r- &show_users: Display a list of all users in the chat.
+    \n\r- &help: Display this help message.\r
+    \r";
+
+    if let Err(e) = reader.get_mut().write_all(help_message.as_bytes()).await {
+        eprintln!("Failed to send the help message: {e}");
+    }
+}
+
 pub async fn check_for_magic_commands(text: &String) -> Option<&str> {
 
     let magic_command_pattern = r"&[a-zA-Z_][a-zA-Z0-9_]*";
@@ -69,6 +87,7 @@ pub async fn check_for_magic_commands(text: &String) -> Option<&str> {
             "&save_text" => return Some("&save_text"),
             "&clear_screen" => return Some("&clear_screen"),
             "&show_users" => return Some("&show_users"),
+            "&help" => return Some("&help"),
             _ => {
                 eprintln!("Unkown Magic Command!");
                 return Some("None");
