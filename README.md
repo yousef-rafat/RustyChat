@@ -23,7 +23,17 @@
 3. Run the executable:
    ```sh
    ./RustyChat.exe -init [PORT]
+## 🌐 Connection
 
+Once the RustyChat server runs, you can connect using a telnet client. Follow these steps to join the chat server:
+
+1. Open your terminal.
+2. Use the `telnet` command to connect to the server. Replace `8080` with the port number you've configured when starting the RustChat server.
+
+   Example command:
+   ```sh
+   telnet 127.0.0.1 8080
+   
 ## ✨ Magic Commands
 
 RustyChat supports a set of **magic commands** that add functionality and enhance the user experience. These commands are invoked directly in the chat interface by typing the command name prefixed with an `&`.
